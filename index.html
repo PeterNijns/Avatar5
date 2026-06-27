@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D pratende avatar — proof of concept</title>
+<style>
+  :root{
+    --bg-1:#13112b; --bg-2:#201b46; --bg-3:#2b2660;
+    --paper:#efe9ff; --muted:#9990c4; --line:rgba(255,255,255,.10);
+    --accent:#6a5cff; --teal:#46e3c0; --amber:#ffc24d; --coral:#ff7a8a;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; color:var(--paper);
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    background:radial-gradient(1100px 700px at 50% -10%,var(--bg-3),transparent 60%),linear-gradient(160deg,var(--bg-1),var(--bg-2));
+    min-height:100%; display:flex; flex-direction:column; align-items:center; padding:20px 16px 40px;
+  }
+  header{text-align:center; margin-bottom:10px}
+  header h1{margin:0; font-size:21px; font-weight:650; letter-spacing:.2px}
+  header p{margin:6px 0 0; color:var(--muted); font-size:13px}
+
+  .panel{width:100%; max-width:560px}
+
+  /* 3D-scene */
+  .stage{position:relative; width:100%; max-width:560px; aspect-ratio:4/5; border-radius:18px; overflow:hidden;
+    background:radial-gradient(120% 90% at 50% 18%,#322a6b,#181436 70%); border:1px solid var(--line)}
+  .stage canvas{display:block; width:100%; height:100%}
+  .placeholder{position:absolute; inset:0; display:flex; flex-direction:column; gap:8px; align-items:center; justify-content:center;
+    text-align:center; padding:30px; color:var(--muted); font-size:14px; line-height:1.5}
+  .placeholder b{color:var(--paper); font-weight:600}
+  .statusPill{position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
+    background:rgba(20,16,45,.7); backdrop-filter:blur(6px); border:1px solid var(--line);
+    padding:6px 14px; border-radius:999px; font-size:12.5px; letter-spacing:.3px; display:flex; align-items:center; gap:8px}
+  .dot{width:9px; height:9px; border-radius:50%; background:var(--muted); transition:background .3s}
+  .dot.listening{background:var(--teal)} .dot.thinking{background:var(--amber); animation:blink 1s infinite}
+  .dot.speaking{background:var(--coral)}
+  @keyframes blink{50%{opacity:.3}}
+
+  /* avatar-bron */
+  .src{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap}
+  .src input{flex:1 1 240px; min-width:0}
+  input,select{background:rgba(255,255,255,.06); border:1px solid var(--line); color:var(--paper);
+    border-radius:11px; padding:0 12px; height:44px; font-size:14px; outline:none}
+  input:focus,select:focus{border-color:var(--accent); background:rgba(255,255,255,.09)}
+  input::placeholder{color:var(--muted)}
+  button{cursor:pointer; border:none; border-radius:11px; font-size:14px; font-weight:600; color:var(--paper)}
+  .btn{height:44px; padding:0 16px; background:rgba(255,255,255,.1)}
+  .rowbtns{margin:10px 0}
+  .btn:hover{background:rgba(255,255,255,.16)}
+  .btn.primary{background:linear-gradient(160deg,#6a5cff,#4636c9)}
+  .link{background:none; color:var(--muted); text-decoration:underline; height:auto; padding:4px 0; font-weight:500; font-size:12.5px}
+
+  /* gespreks-controls */
+  .controls{display:flex; gap:10px; align-items:center; margin-top:14px}
+  .mic{flex:0 0 auto; width:52px; height:52px; border-radius:50%; display:grid; place-items:center;
+    background:linear-gradient(160deg,#6a5cff,#4636c9); box-shadow:0 6px 18px rgba(70,54,201,.4); transition:transform .12s,background .2s}
+  .mic.on{background:linear-gradient(160deg,#ff6b7d,#e23d56)}
+  .mic:active{transform:translateY(1px)} .mic:disabled{opacity:.4; cursor:not-allowed}
+  .mic svg{width:22px; height:22px; fill:#fff}
+  .controls input{flex:1; height:48px}
+  .send{height:48px; padding:0 18px; background:rgba(255,255,255,.1)}
+  .send:hover{background:rgba(255,255,255,.16)}
+
+  .log{margin-top:18px; display:flex; flex-direction:column; gap:10px}
+  .bubble{padding:11px 14px; border-radius:14px; font-size:14.5px; line-height:1.45; max-width:88%; white-space:pre-wrap}
+  .me{align-self:flex-end; background:#6a5cff; border-bottom-right-radius:5px}
+  .bot{align-self:flex-start; background:rgba(255,255,255,.08); border:1px solid var(--line); border-bottom-left-radius:5px}
+
+  details{margin-top:18px; border:1px solid var(--line); border-radius:12px; padding:2px 14px; background:rgba(255,255,255,.04)}
+  summary{cursor:pointer; padding:11px 0; font-size:13.5px; font-weight:600}
+  details ol{margin:4px 0 12px; padding-left:18px; color:var(--muted); font-size:13px; line-height:1.6}
+  details code{background:rgba(255,255,255,.08); padding:1px 5px; border-radius:5px; color:var(--paper)}
+  .cfg{display:flex; gap:8px; margin:6px 0 12px; flex-wrap:wrap}
+  .cfg input{flex:1 1 220px}
+</style>
+</head>
+<body>
+  <header>
+    <h1>3D pratende avatar <span style="font-size:12px;font-weight:600;color:var(--teal);vertical-align:middle">build v5</span></h1>
+    <p>Laad je eigen Ready Player Me-hoofd, stel een vraag en het antwoord wordt voorgelezen met lip-sync.</p>
+  </header>
+
+  <div class="panel">
+    <div class="stage" id="stage">
+      <div class="placeholder" id="placeholder">
+        <div>🧑‍🦱</div>
+        <div><b>Nog geen 3D-hoofd geladen.</b><br>Maak er één bij Avaturn en upload de <code>.glb</code> hieronder.</div>
+      </div>
+      <div class="statusPill"><span class="dot" id="dot"></span><span id="status">Klaar</span></div>
+    </div>
+
+    <button class="btn primary" id="createBtn" style="width:100%;margin-top:12px">✨ Maak mijn avatar bij Avaturn (nieuw tabblad)</button>
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.5;margin:8px 0 4px">Maak je hoofd van een selfie op Avaturn, klik op <b style="color:var(--paper)">Export</b> en download het <code>.glb</code>-bestand. Kom terug en kies hieronder <b style="color:var(--paper)">Upload .glb</b>.</p>
+    <div class="src">
+      <input type="text" id="avatarUrl" placeholder="… of plak een .glb-link">
+      <button class="btn primary" id="loadBtn">Laad hoofd</button>
+      <input type="file" id="file" accept=".glb,model/gltf-binary" style="display:none">
+      <button class="btn" id="uploadBtn">Upload .glb</button>
+    </div>
+
+    <div class="controls">
+      <button class="mic" id="mic" title="Spreek je vraag in">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V21a1 1 0 1 0 2 0v-3.08A7 7 0 0 0 19 11z"/></svg>
+      </button>
+      <input type="text" id="text" placeholder="… of typ hier je vraag" autocomplete="off">
+      <button class="send" id="send">Vraag</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <details>
+      <summary>Hoe maak ik een 3D-hoofd van mezelf?</summary>
+      <ol>
+        <li>Ga naar <code>avaturn.me</code> (of tik op de knop hierboven) en start het maken van een avatar.</li>
+        <li>Upload of neem een selfie, recht van voren met goed licht. De AI maakt er een realistisch 3D-hoofd van.</li>
+        <li>Pas haar, bril en kleding aan en klik op <code>Export</code> → download als <code>.glb</code>.</li>
+        <li>Kom terug en klik <code>Upload .glb</code>. De ARKit-blendshapes en visemes voor lip-sync zitten al in het bestand.</li>
+      </ol>
+    </details>
+
+    <details open>
+      <summary>Instellingen (stem &amp; API-sleutel)</summary>
+      <div class="cfg">
+        <select id="voiceSel"><option value="">Automatische NL-stem</option></select>
+      </div>
+      <div class="cfg">
+        <input type="password" id="apiKey" placeholder="Anthropic API-sleutel (alleen nodig buiten claude.ai)">
+      </div>
+      <div class="rowbtns"><button class="btn" id="testConn">Test verbinding</button></div>
+      <div id="diag" style="font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:10px;white-space:pre-wrap"></div>
+      <ol>
+        <li>Binnen claude.ai werkt de API zonder sleutel — laat het veld leeg.</li>
+        <li>Open je dit bestand zelfstandig (bv. op je werk), vul dan je eigen sleutel in. De call gaat dan rechtstreeks vanuit de browser.</li>
+      </ol>
+    </details>
+  </div>
+
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============ helpers (puur, testbaar) ============ */
+export function normalizeAvatarUrl(url){
+  url = (url||"").trim();
+  if(!url) return "";
+  if(url.includes("models.readyplayer.me") && !/morphTargets=/i.test(url)){
+    url += (url.includes("?") ? "&" : "?") + "morphTargets=ARKit,Oculus%20Visemes";
+  }
+  return url;
+}
+export function extractText(data){
+  return ((data && data.content) || [])
+    .map(b => b && b.type === "text" ? b.text : "")
+    .join("").trim();
+}
+export function buildHeaders(apiKey){
+  const h = { "Content-Type":"application/json" };
+  if(apiKey){
+    h["x-api-key"] = apiKey;
+    h["anthropic-version"] = "2023-06-01";
+    h["anthropic-dangerous-direct-browser-access"] = "true";
+  }
+  return h;
+}
+
+/* ============ state ============ */
+let state = "idle"; // idle | listening | thinking | speaking
+const history = [];
+const $ = id => document.getElementById(id);
+const dot = $("dot"), statusEl = $("status"), placeholder = $("placeholder");
+const STATUS = { idle:"Klaar", listening:"Aan het luisteren…", thinking:"Aan het denken…", speaking:"Aan het praten…" };
+
+function setState(s){
+  state = s;
+  statusEl.textContent = STATUS[s] || "";
+  dot.className = "dot" + (s==="idle" ? "" : " "+s);
+  $("mic").classList.toggle("on", s==="listening");
+}
+
+/* ============ 3D-scene ============ */
+const stage = $("stage");
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
+camera.position.set(0, 1.59, 0.72);
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.58, 0);
+controls.enablePan = false;
+controls.minDistance = 0.45; controls.maxDistance = 1.4;
+controls.minPolarAngle = Math.PI/3; controls.maxPolarAngle = Math.PI/1.8;
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.5));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(1, 3, 2); scene.add(key);
+const fill = new THREE.DirectionalLight(0x8899ff, 0.7); fill.position.set(-2, 1, 1.5); scene.add(fill);
+
+function resize(){
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if(!w || !h) return;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(w, h, false);
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ---- avatar + morphs ---- */
+let avatar = null;
+let morphMeshes = [];
+let availableMorphs = new Set();
+let visemeDriversP = [], vowelsP = [], consP = [];
+let jawDriver = null, hasMouth = false, hasSmile = false;
+const actual = {}; // huidige morph-waarden die we beheren
+
+function collectMorphs(root){
+  morphMeshes = [];
+  availableMorphs = new Set();
+  root.traverse(o => {
+    if(o.isMesh && o.morphTargetDictionary){
+      morphMeshes.push(o);
+      for(const k in o.morphTargetDictionary) availableMorphs.add(k);
+    }
+  });
+  const has = n => availableMorphs.has(n);
+  vowelsP = VOWELS.filter(has);
+  consP = CONS.filter(has);
+  visemeDriversP = ALL_VIS.filter(has);
+  jawDriver = ["jawOpen","mouthOpen","viseme_aa","viseme_O"].find(has) || null;
+  hasSmile = has("mouthSmileLeft");
+  hasMouth = visemeDriversP.length > 0 || !!jawDriver;
+}
+function setMorph(name, v){
+  for(const m of morphMeshes){
+    const i = m.morphTargetDictionary[name];
+    if(i !== undefined) m.morphTargetInfluences[i] = v;
+  }
+}
+
+const loader = new GLTFLoader();
+function updateDiag(){
+  const diag = $("diag"); if(!diag) return;
+  if(!avatar){ return; }
+  diag.textContent = "Model: " + availableMorphs.size + " blendshapes · mond-animatie: " +
+    (hasMouth ? "ja" : "NEE") + " · visemes: " + visemeDriversP.length +
+    (jawDriver ? " · kaak: " + jawDriver : "");
+}
+function mountAvatar(gltf){
+  if(avatar) scene.remove(avatar);
+  avatar = gltf.scene;
+  scene.add(avatar);
+  collectMorphs(avatar);
+  placeholder.style.display = "none";
+  updateDiag();
+  if(!hasMouth){
+    placeholder.querySelector("div:nth-child(2)").innerHTML =
+      "<b>Dit model heeft geen mond-blendshapes.</b><br>Exporteer bij Avaturn opnieuw met de optie <i>mét blendshapes / visemes</i>.";
+    placeholder.style.display = "flex";
+  }
+}
+function loadFromUrl(raw){
+  const url = normalizeAvatarUrl(raw);
+  if(!url) return;
+  statusEl.textContent = "Hoofd laden…";
+  loader.load(url, gltf => { mountAvatar(gltf); setState("idle"); },
+    undefined,
+    err => { statusEl.textContent = "Laden mislukt"; console.error(err); });
+}
+function loadFromFile(file){
+  const r = new FileReader();
+  r.onload = e => loader.parse(e.target.result, "", gltf => { mountAvatar(gltf); setState("idle"); },
+    err => { statusEl.textContent = "Bestand ongeldig"; console.error(err); });
+  r.readAsArrayBuffer(file);
+}
+
+/* ---- lip-sync + idle-animatie ---- */
+const VOWELS = ["viseme_aa","viseme_E","viseme_I","viseme_O","viseme_U"];
+const CONS   = ["viseme_PP","viseme_FF","viseme_TH","viseme_DD","viseme_kk","viseme_SS","viseme_nn"];
+const ALL_VIS = VOWELS.concat(CONS, ["viseme_sil"]);
+let curViseme = null, lastSwitch = 0, isVowel = false, jawAmt = 0;
+let nextBlink = 1500, blinking = 0, speakUntil = 0;
+
+function pickViseme(){
+  if(vowelsP.length && (Math.random() < 0.68 || !consP.length)){ isVowel = true; return vowelsP[(Math.random()*vowelsP.length)|0]; }
+  if(consP.length){ isVowel = false; return consP[(Math.random()*consP.length)|0]; }
+  isVowel = true; return null; // geen visemes -> alleen kaak
+}
+
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta(), t = clock.elapsedTime * 1000;
+
+  if(avatar){
+    // subtiele "leven"-beweging altijd, ook zonder blendshapes (bewijst dat de lus draait)
+    avatar.rotation.y = Math.sin(clock.elapsedTime*0.5)*0.04;
+
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    const talking = (state === "speaking") || (now < speakUntil);
+    if(state === "speaking" && now >= speakUntil) setState("idle");
+
+    if(morphMeshes.length){
+      const want = {};
+      // blink-cyclus
+      if(t > nextBlink && !blinking){ blinking = t; nextBlink = t + 2500 + Math.random()*3000; }
+      let blinkV = 0;
+      if(blinking){ const p = (t - blinking)/130; blinkV = p < 1 ? Math.sin(p*Math.PI) : 0; if(p>=1) blinking = 0; }
+      want["eyeBlinkLeft"] = blinkV; want["eyeBlinkRight"] = blinkV;
+
+      if(talking){
+        if(t - lastSwitch > 105){ jawAmt = 0.14 + Math.random()*0.5; curViseme = pickViseme(); lastSwitch = t; }
+        for(const v of visemeDriversP) want[v] = 0;
+        if(curViseme) want[curViseme] = 0.85;
+        if(jawDriver) want[jawDriver] = jawAmt;
+        if(hasSmile){ want["mouthSmileLeft"] = 0.06; want["mouthSmileRight"] = 0.06; }
+      } else if(state === "thinking"){
+        for(const v of visemeDriversP) want[v] = 0;
+        if(jawDriver) want[jawDriver] = 0;
+        want["browInnerUp"] = 0.4;
+        if(hasSmile){ want["mouthSmileLeft"] = 0.06; want["mouthSmileRight"] = 0.06; }
+      } else {
+        for(const v of visemeDriversP) want[v] = 0;
+        if(jawDriver) want[jawDriver] = 0;
+        want["browInnerUp"] = 0;
+        if(hasSmile){ want["mouthSmileLeft"] = 0.16; want["mouthSmileRight"] = 0.16; }
+      }
+
+      // soepel naar de gewenste waarden lerpen
+      const names = new Set([...Object.keys(want), ...Object.keys(actual)]);
+      const f = 1 - Math.pow(0.001, dt);
+      for(const n of names){
+        const target = want[n] || 0;
+        actual[n] = (actual[n] || 0) + (target - (actual[n] || 0)) * Math.min(1, f*1.6);
+        setMorph(n, actual[n]);
+      }
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ============ STT ============ */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null; const micSupported = !!SR;
+if(micSupported){
+  recognition = new SR();
+  recognition.lang = "nl-BE"; recognition.interimResults = false; recognition.maxAlternatives = 1;
+  recognition.onresult = e => ask(e.results[0][0].transcript);
+  recognition.onerror = () => setState("idle");
+  recognition.onend = () => { if(state === "listening") setState("idle"); };
+}
+function toggleMic(){
+  if(!micSupported) return;
+  if(state === "listening"){ try{recognition.stop();}catch(e){} setState("idle"); return; }
+  if(window.speechSynthesis) window.speechSynthesis.cancel();
+  try{ recognition.start(); setState("listening"); }catch(e){ setState("idle"); }
+}
+
+/* ============ TTS ============ */
+let voices = [];
+function loadVoices(){ if(window.speechSynthesis) voices = window.speechSynthesis.getVoices() || []; fillVoiceSelect(); }
+function fillVoiceSelect(){
+  const sel = $("voiceSel"); if(!sel) return;
+  const cur = sel.value;
+  sel.length = 1;
+  voices.filter(v => /^nl/i.test(v.lang)).forEach(v => {
+    const o = document.createElement("option"); o.value = v.name; o.textContent = v.name + " (" + v.lang + ")"; sel.appendChild(o);
+  });
+  sel.value = cur;
+}
+if(window.speechSynthesis && window.speechSynthesis.addEventListener){
+  window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+}
+loadVoices();
+function pickVoice(){
+  const chosen = $("voiceSel").value;
+  if(chosen){ const v = voices.find(v => v.name === chosen); if(v) return v; }
+  return voices.find(v => v.lang === "nl-BE") || voices.find(v => v.lang === "nl-NL") ||
+         voices.find(v => /^nl/i.test(v.lang)) || null;
+}
+function speak(text){
+  if(!window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined"){ setState("idle"); return; }
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "nl-BE"; const v = pickVoice(); if(v) u.voice = v;
+  u.rate = 1.02;
+  // Schat de spreekduur: iOS/Safari vuurt onstart/onboundary/onend onbetrouwbaar,
+  // dus de mondanimatie hangt hier niet van af.
+  const nowMs = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  speakUntil = nowMs + Math.max(1200, (text || "").length * 70);
+  setState("speaking");
+  u.onstart = () => setState("speaking");
+  u.onboundary = () => { lastSwitch = 0; };
+  u.onend = () => { speakUntil = 0; setState("idle"); };
+  u.onerror = () => { speakUntil = 0; setState("idle"); };
+  window.speechSynthesis.speak(u);
+}
+
+/* ============ brein (Anthropic API) ============ */
+const SYSTEM =
+  "Je bent een vriendelijke Nederlandstalige (Vlaamse) gespreksassistent met een gezicht. " +
+  "Je antwoorden worden hardop voorgelezen, dus schrijf in natuurlijke gesproken stijl: geen " +
+  "opsommingstekens, geen markdown, geen kopjes. Hou het kort, meestal 2 tot 4 zinnen. Antwoord in het Nederlands.";
+
+function addBubble(text, who){
+  const b = document.createElement("div");
+  b.className = "bubble " + (who === "me" ? "me" : "bot");
+  b.textContent = text;
+  $("log").appendChild(b);
+  if(typeof b.scrollIntoView === "function") b.scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+function persistKey(){ try{ localStorage.setItem("avatar_api_key", $("apiKey").value.trim()); }catch(e){} }
+async function testConn(){
+  const diag = $("diag"), key = $("apiKey").value.trim();
+  const host = location.hostname || "(lokaal bestand)";
+  const inClaude = /(^|\.)claude\.ai$/i.test(location.hostname);
+  diag.textContent = "Locatie: "+host+(inClaude?" (claude.ai)":" (standalone)")+"\nSleutel ingevuld: "+(key?"ja":"nee")+"\nTesten…";
+  if(!key && !inClaude){ diag.textContent = "Locatie: "+host+" (standalone)\nSleutel ingevuld: nee\n→ Geen sleutel. Plak je sk-ant-… sleutel hierboven."; return; }
+  try{
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST", headers: buildHeaders(key),
+      body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:16, messages:[{role:"user",content:"ping"}] })
+    });
+    if(res.ok){ diag.textContent = diag.textContent.replace("Testen…","Verbinding OK \u2713"); }
+    else { let d=""; try{ const ej=await res.json(); d=(ej.error&&ej.error.message)||""; }catch(e){}
+      diag.textContent = diag.textContent.replace("Testen…","HTTP "+res.status+(d?": "+d:"")); }
+  }catch(err){
+    diag.textContent = diag.textContent.replace("Testen…","Netwerk/CORS geblokkeerd: "+((err&&err.message)||err));
+  }
+}
+async function ask(question){
+  question = (question||"").trim(); if(!question) return;
+  const key = $("apiKey").value.trim();
+  const standalone = !/(^|\.)claude\.ai$/i.test(location.hostname);
+  addBubble(question, "me"); setState("thinking");
+  if(!key && standalone){
+    setState("idle");
+    addBubble("Je draait dit buiten claude.ai, dus een eigen Anthropic API-sleutel is nodig. Open \"Instellingen\" en plak je sleutel (begint met sk-ant-).", "bot");
+    return;
+  }
+  history.push({ role:"user", content:question });
+  try{
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST",
+      headers: buildHeaders(key),
+      body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:1000, system:SYSTEM, messages:history })
+    });
+    if(!res.ok){
+      let detail=""; try{ const ej=await res.json(); detail=(ej.error&&ej.error.message)||JSON.stringify(ej); }catch(e){ detail=res.statusText||""; }
+      history.pop(); setState("idle");
+      addBubble("API-fout "+res.status+": "+detail, "bot");
+      return;
+    }
+    const data = await res.json();
+    let text = extractText(data) || "Sorry, ik kreeg geen antwoord terug.";
+    history.push({ role:"assistant", content:text });
+    addBubble(text, "bot");
+    speak(text);
+  }catch(err){
+    history.pop(); setState("idle");
+    addBubble("Verbinding mislukt: "+((err&&err.message)||err)+". Bij standalone gebruik wijst dit meestal op een ontbrekende/foute sleutel of een CORS-blokkade.", "bot");
+  }
+}
+
+/* ============ wiring ============ */
+/* Ready Player Me avatar-maker in een eigen tabblad (betrouwbaarder dan ingebed) */
+$("createBtn").addEventListener("click", () => {
+  window.open("https://avaturn.me", "_blank", "noopener");
+});
+
+$("loadBtn").addEventListener("click", () => loadFromUrl($("avatarUrl").value));
+$("avatarUrl").addEventListener("keydown", e => { if(e.key==="Enter") loadFromUrl($("avatarUrl").value); });
+$("uploadBtn").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", e => { if(e.target.files[0]) loadFromFile(e.target.files[0]); });
+$("mic").addEventListener("click", toggleMic);
+$("send").addEventListener("click", () => { const t = $("text").value; $("text").value = ""; ask(t); });
+$("text").addEventListener("keydown", e => { if(e.key==="Enter"){ const t = $("text").value; $("text").value=""; ask(t); } });
+$("testConn").addEventListener("click", testConn);
+try{ const _sk = localStorage.getItem("avatar_api_key"); if(_sk) $("apiKey").value = _sk; }catch(e){}
+$("apiKey").addEventListener("change", persistKey);
+$("apiKey").addEventListener("blur", persistKey);
+
+if(!micSupported){ $("mic").disabled = true; $("mic").title = "Spraakherkenning niet ondersteund in deze browser"; }
+setState("idle");
+</script>
+</body>
+</html>
